@@ -1,0 +1,229 @@
+ 
+
+--PLSQL>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+--1Trig,>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+-- When a new brick is to be inserted, give it a default Color_Brick
+-- record(red) 
+SET Serveroutput ON;
+CREATE OR REPLACE TRIGGER insertB_C_afterBrickInsert
+after INSERT
+ON BRICK 
+FOR EACH ROW
+DECLARE
+colorName Varchar2(40);
+defaultColor Number;
+materialName Varchar2(40);
+BEGIN
+select name into materialName from material 
+where id = :new.material_id;
+
+if :new.material_id = 115 or :new.material_id = 225 then
+ defaultColor := 33;
+ 
+elsif :new.material_id = 335 then
+ defaultColor := 22;
+ 
+ elsif :new.material_id = 445 then
+ 
+  defaultColor := 44;
+  end if;
+  
+select name into colorName from color
+where id = defaultColor;
+
+Insert INTO Brick_Color(Color_id, Brick_id) VALUES (defaultColor, :new.id);
+  dbms_output.put_line('A newly inserted brick : '||:NEW.Name ||' Has been inserted with a default color: '||colorName);
+  dbms_output.put_line('which is a default color for material of type: '||materialName);
+END;
+
+
+insert INTO Brick(id, Name, electric, Material_id) VALUES (666,'whip',1,445);
+
+
+--2Trig>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+-- When Creating a new Figurine, check if there has not been yet created>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+-- a figurine with the same bricks(if there is at least one difference>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+-- in used bricks creation is allowed) and change the non-unique brick >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+-- so the figurine will be unique>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+SET Serveroutput ON;
+CREATE OR REPLACE TRIGGER keepFigsUnique
+before INSERT
+ON minifigure 
+FOR EACH ROW
+DECLARE
+value NUMBER;
+isUnique NUMBER;
+counter NUMBER;
+substitute NUMBER;
+whichRow NUMBER;
+checkID number;
+BEGIN
+value :=1;
+counter :=1;
+
+select count(*) into checkID from minifigure
+where id = :new.id;
+if checkID <1 then
+
+while (value =1)
+loop
+whichRow := 1;
+select count(*) into isunique from minifigure
+where brick_id= :new.brick_id and Brick_2_id= :new.Brick_2_id and Brick_3_id = :new.Brick_3_id and Brick_4_id = :new.Brick_4_id;
+
+if isunique <1 then --if there is no repeated seqence of bricks, break the loop
+value := 0;
+else
+
+CASE counter
+      when 1 then 
+      select id into substitute from brick 
+      where id !=:new.brick_id  and ROWNUM <= whichRow and name =
+      (select name from brick where id = :new.brick_id);
+     :new.brick_id := substitute;
+      counter := counter +1;
+      
+      when 2 then 
+       select id into substitute from brick 
+      where id !=:new.Brick_2_id  and ROWNUM <= whichRow and name =
+      (select name from brick where id = :new.Brick_2_id);
+      :new.Brick_2_id :=substitute;
+      counter := counter +1;
+      
+      when 3 then 
+      select id into substitute from 
+      brick where id !=:new.Brick_3_id  and ROWNUM <= whichRow and name =
+      (select name from brick where id = :new.Brick_3_id);
+      :new.Brick_3_id :=substitute;
+      counter := counter +1;
+      
+      when 4 then 
+      select id into substitute from 
+      brick where id !=:new.Brick_4_id  and ROWNUM <= whichRow and name =
+      (select name from brick where id = :new.Brick_4_id);
+       :new.Brick_4_id :=substitute;
+      counter := counter +1;
+
+      else 
+     whichRow := whichrow + 1;
+      counter :=0;
+   END CASE;
+
+end if;
+
+end loop;
+
+else
+RAISE_APPLICATION_ERROR(-20100, 'This ID already exists...');
+end if;
+
+END;
+
+
+
+
+insert INTO Minifigure(id, Name, Brick_id, Brick_2_id, Brick_3_id, Brick_4_id ) VALUES (112,'new',75,76,77,78);
+
+
+--MSSQL>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+--1Trig,>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+-- When updating themes name to "StarWars-CANCELLED"-> update >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+-- that themes Sets DiscontinuesDates to null>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+CREATE TRIGGER updateDiscDate ON theme
+AFTER UPDATE
+AS
+BEGIN
+
+declare @themeID int;
+declare @isCancelled int;
+
+set @isCancelled =(	select count(*) from inserted
+where inserted.name = 'CANCELLED'); 
+
+declare cancList cursor for
+	select Inserted.id from inserted
+where inserted.name = 'CANCELLED'; 
+
+if @isCancelled >0
+begin
+open cancList;
+	fetch next from cancList into @themeID;
+	while @@FETCH_STATUS = 0
+	begin
+	
+		Update CompleteSet set DiscontinueDate_id = null where Theme_id = @themeID;
+
+	fetch next from cancList into @themeID;
+	end
+	close cancList;
+	deallocate cancList;
+
+	print 'Sets of theme:  have been udpated to havde null disconinuedate';
+	end
+	
+
+
+END;
+
+
+update theme set name = 'CANCELLED' where id = 131;
+
+
+--2Trig>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+--when Creating a box for a set, check if capacity will>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+--be equal or smaller to the total number of pieces contained in the set>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+-- then find a box that fits the capacity>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+alter TRIGGER BoxCapacityCheck ON box
+AFTER INSERT
+AS
+BEGIN
+
+declare @setID int, @boxID int;
+declare @countBricks int;
+declare @boxCap int, @newCap int;
+
+declare BrickCheck cursor for
+	select inserted.CompleteSet_id, inserted.Capacity, inserted.id from inserted ; 
+
+open BrickCheck;
+	fetch next from BrickCheck into @setID, @boxCap,@boxID;
+	while @@FETCH_STATUS = 0
+	begin
+	set @countBricks=(select sum(quantity) from CompleteSet_Brick where CompleteSet_id = @setID);
+
+	if @countBricks>= @boxCap
+	begin
+	
+	update Box set Capacity = (@boxCap + @countBricks) where id = @boxID;
+	set  @newCap = (@boxCap + @countBricks);
+	print 'Box: '+CONVERT(VARCHAR, @boxID)+' that just have been inserted for setID: '+CONVERT(VARCHAR, @setID)+' had to small capacity for the set.';
+	print 'Capacity of the box was changed form: '+CONVERT(VARCHAR, @boxCap)+' to a new capacity: '+CONVERT(VARCHAR, @newCap);
+
+	end
+		
+	fetch next from BrickCheck into @setID, @boxCap,@boxID;
+	end
+	close BrickCheck;
+	deallocate BrickCheck;
+
+END;
+
+
+INSERT INTO CompleteSet(id, Name, Theme_id, BuildingDifficulty_id,price , DiscontinueDate_id)
+VALUES
+	(18,'DeLoreanTimeMachine',431,1,null,null);
+
+	INSERT INTO CompleteSet_Brick(CompleteSet_id, Brick_id, quantity)
+VALUES
+	(18,71,100),
+	(18,72,100);
+
+
+	INSERT INTO Box(id, Name, Capacity ,CompleteSet_id)
+VALUES
+	(88,'semi-small',50,18);

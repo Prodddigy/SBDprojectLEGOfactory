@@ -1,0 +1,231 @@
+--PLSQL>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+--1PROC, update set if its discontinuedate is null >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+-- and if price is not null. Update discontinue date to the one
+-- in the input of procedure
+
+SET Serveroutput ON;
+
+CREATE OR REPLACE PROCEDURE updateSetDateAndPrice
+( setID NUMBER, newPrice NUMBER, newDate NUMBER )
+AS 
+isFound NUMBER;
+BEGIN
+SELECT count(*) into isfound from CompleteSet 
+    where id =setID and (price IS NULL and discontinuedate_ID IS NULL );
+
+IF isFound >= 1 THEN
+	
+    update CompleteSet set price = newPrice, discontinuedate_ID= newDate where ID = setID;
+     
+     dbms_output.put_line('Set with id:'||setID||' has been sucessfully update with a new price:'||newPrice||' and a new date:'||newDate) ;
+    
+ELSE 
+	  dbms_output.put_line('The set was not found please make sure the ID is present in the database or the chosen set has price and discontinue date null');
+END IF;
+END;
+	CALL updateSetDateAndPrice(7504,'22,99',43);
+
+
+--2PROC, create a Set based on some parameters,>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+--default parameters: discontinuedate, price, 
+--check some stuff before insert
+
+
+
+SET Serveroutput ON;
+create or replace PROCEDURE insertSet
+( newID NUMBER, newName Varchar2, themeID NUMBER, buildingDiff NUMBER, price number, discDate NUMBER )
+AS 
+isFound NUMBER;
+themeFound NUMBER;
+diffFound NUMBER;
+isName NUMBER;
+isDate NUMBER;
+nameSet varchar2(40);
+setID number;
+
+CURSOR all_sets IS
+SELECT ID, name from completeset;
+
+BEGIN
+SELECT count(*) into isFound from CompleteSet 
+    where id =newID;
+SELECT count(*) into isName from CompleteSet
+    where Name = newName;
+Select count(*) into themeFound from Theme
+    where id = themeID;
+select count(*) into diffFound from buildingdifficulty
+    where id = buildingDiff;
+    
+ 
+select count(*) into isDate from discontinuedate
+where ID = discDate;
+
+
+
+IF isFound >= 1 or isName >= 1 THEN
+
+   dbms_output.put_line('You can not insert '||newName||' set, cause it already exists in DB as a name or ID ');
+
+
+ELSIF themeFound<1 or diffFound <1  THEN
+
+ dbms_output.put_line('No such a theme found found, not inserting OR No such difficulty found in DB');
+
+
+elsIF  isDate <1 then
+ dbms_output.put_line('Date ID does not exist');
+ 
+ELSE 
+	  dbms_output.put_line('Set '||newName||'. Has been inserted succesfully');
+      insert INTO CompleteSet(id, Name, Theme_id, BuildingDifficulty_id,price , DiscontinueDate_id) VALUES (newID,newName,themeID,buildingDiff,price,discDate);
+END IF;
+
+ dbms_output.put_line('Here are all current sets: ');
+OPen all_sets;
+LOOP
+    FETCH all_sets INTO  setID,nameSet ;
+    EXIT WHEN all_sets%NOTFOUND;
+    dbms_output.put_line('SetID: '||setID||', Name of the set: '||nameSet);
+    END LOOP;
+    CLOSE all_sets;
+
+END;
+
+call insertSet(1,'aa',231,1,'22,22',123 );
+
+
+call insertSet(1,'aa',231,1,'22,22',123 );
+
+--MSSQL>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+--1PROC, check the total number of bricks used in a set, and how many>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+-- figurines are contained in it
+--if it is zero -> add a figurine to it
+
+alter PROCEDURE checkSetBrickNum
+@setID int
+
+AS 
+BEGIN
+
+
+	DECLARE @brickCounter int, @isFound int, @defaultMini int;
+	DECLARE @brick1 int, @brick2 int, @brick3 int, @brick4 int;
+	DECLARE @figName varchar(40);
+
+SET @isFound = (SELECT count(*) from CompleteSet where id = @setID);
+set @defaultMini = 399;--this will be a default minifigure
+ 
+ set @brick1 = (select brick_id from Minifigure where id = @defaultMini);
+ set @brick2 = (select Brick_2_id from Minifigure where id = @defaultMini);
+ set @brick3 = (select brick_3_id from Minifigure where id = @defaultMini);
+ set @brick4 = (select brick_4_id from Minifigure where id = @defaultMini);
+
+ set @figName = (select name from Minifigure where id = @defaultMini);
+IF (@isFound=1) 
+begin
+
+if  (not exists(select 1 from Set_Minifigure where CompleteSet_id=@setID))
+begin
+
+	INSERT INTO Set_Minifigure(CompleteSet_id, Minifigure_id, quantity)
+VALUES
+	(@setID,@defaultMini,1);--we want every set to consist of at least 1 minifigure, later you can update it or add more
+
+	INSERT INTO CompleteSet_Brick(CompleteSet_id, Brick_id, quantity)
+VALUES
+--if set containes a minifig, we need "physically" add them to the set
+	(@setID,@brick1,1),
+	(@setID,@brick2,1),
+	(@setID,@brick3,1),
+	(@setID,@brick4,1);
+	
+	PRINT 'Set: '+CONVERT(VARCHAR, @setID)+' had zero minifigures so I added: '+@figName+' as it is considered as a default minifigureine.' ;
+
+	end
+
+	set @brickCounter = (select sum(quantity) from CompleteSet_Brick where CompleteSet_id=@setID);
+
+	PRINT 'Set: '+CONVERT(VARCHAR, @setID)+', contains: '+CONVERT(VARCHAR, @brickCounter)+' bricks!';
+
+	end
+ELSE 
+begin
+
+	PRINT 'This setID does not exist.';
+	end
+END;
+
+--2PROC, check how many sets does a certain company has, considering all
+-- themes that they own>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+-- and remove all sets that have zero bricks>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+alter PROCEDURE checkCorpSetsRmvEmpty
+@corpID int
+
+AS 
+BEGIN
+
+	DECLARE @setID int, @isFound int, @countSets int, @checkBricks int;
+	DECLARE @setName varchar(40), @themeName varchar(40), @corpName varchar(40);
+
+	set @corpName = (select name from Corporation where id = @corpID);
+
+
+	SET @isFound = (SELECT count(*) from Corporation where id = @corpID);
+
+	declare corpSets cursor for
+	select  CompleteSet.id , completeset.name  from theme, CompleteSet where theme.id= theme_Id and Corporation_id=@corpID;
+
+	declare corpSetList cursor for
+select  theme.Name , count(*)  from theme, CompleteSet where theme.id= theme_Id and Corporation_id=@corpID group by theme.name;
+
+IF (@isFound=1) 
+begin
+
+	open corpSets;
+	fetch next from corpSets into @setID, @setName;
+	while @@FETCH_STATUS = 0
+	begin
+	
+		
+		if(not exists (select quantity from CompleteSet_Brick where CompleteSet_id=@setID))
+		begin
+			
+			delete from CompleteSet where id=@setID;
+			PRINT 'Set: '+CONVERT(VARCHAR, @setID)+', with name'+@setName+' was empty so it was removed.';
+
+		end
+
+	fetch next from corpSets into @setID, @setName;
+	end
+	close corpSets;
+	deallocate corpSets;
+
+	PRINT 'Corporation: '+@corpName+' has those numbers of sets, ordered by themes';
+	open corpSetList;
+	fetch next from corpSetList into  @themeName, @countSets;
+	while @@FETCH_STATUS = 0
+	begin
+			PRINT 'Theme: '+@themeName+' has: '+CONVERT(VARCHAR, @countSets)+' number of sets';
+		
+	fetch next from corpSetList into @themeName, @countSets;
+	end
+	close corpSetList;
+	deallocate corpSetList;
+
+
+	end
+ELSE 
+begin
+
+	PRINT 'This corporation: does not exist.';
+	end
+END;
+
+
+exec checkCorpSetsRmvEmpty @corpID = 11;
+
+INSERT INTO CompleteSet(id, Name, Theme_id, BuildingDifficulty_id,price , DiscontinueDate_id)
+VALUES
+	(44,'Pirates of the caribbean',231,1,99.99,21);
